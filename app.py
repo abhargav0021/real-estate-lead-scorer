@@ -59,7 +59,7 @@ def convert_redfin(df: pd.DataFrame) -> pd.DataFrame:
     out["bathrooms"]    = _clean_numeric(df["BATHS"]).fillna(1).astype(int)
     out["sqft"]         = _clean_numeric(df["SQUARE FEET"]).fillna(1200).astype(int)
     out["year_built"]   = _clean_numeric(df.get("YEAR BUILT", pd.Series(dtype=str))).fillna(1980).astype(int)
-    out["asking_rent"]  = (out["price"] * 0.009).round(0).astype(int)
+    out["asking_rent"]  = (out["sqft"] * 1.10).round(0).astype(int)
     out["neighborhood_score"] = 7
 
     return out.reset_index(drop=True)

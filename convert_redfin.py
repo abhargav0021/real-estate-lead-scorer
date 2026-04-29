@@ -78,8 +78,8 @@ def convert(input_path: str, rent_pct: float, default_score: int, output_path: s
     else:
         out["year_built"] = 1980
 
-    # asking_rent: use 1% rule by default (monthly rent = price × rent_pct)
-    out["asking_rent"] = (out["price"] * rent_pct).round(0).astype(int)
+    # asking_rent: estimate from sqft so GRM varies per property
+    out["asking_rent"] = (out["sqft"] * 1.10).round(0).astype(int)
 
     # neighborhood_score: default value (user can edit the CSV to refine)
     out["neighborhood_score"] = default_score

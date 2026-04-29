@@ -113,9 +113,9 @@ Property:
 - Neighborhood Score: {row["neighborhood_score"]}/10
 
 Scoring rules — apply these strictly:
-- score 8-10 → decision MUST be BUY   (GRM ≤ 10 AND neighborhood ≥ 6, OR GRM ≤ 8 any neighborhood)
-- score 5-7  → decision MUST be INVESTIGATE  (GRM 10-13 OR neighborhood 4-5)
-- score 1-4  → decision MUST be PASS  (GRM > 13 OR neighborhood ≤ 3 OR price_per_sqft > $180)
+- score 8-10 → decision MUST be BUY   (GRM ≤ 12 AND neighborhood ≥ 6, OR GRM ≤ 10 any neighborhood)
+- score 5-7  → decision MUST be INVESTIGATE  (GRM 12-15 OR neighborhood 4-5)
+- score 1-4  → decision MUST be PASS  (GRM > 15 OR neighborhood ≤ 3 OR price_per_sqft > $250)
 
 Return exactly this JSON shape:
 {{

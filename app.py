@@ -12,6 +12,9 @@ load_dotenv()
 MODEL = "llama-3.3-70b-versatile"
 SYSTEM_PROMPT = "You are a real estate investment analyst. Always respond with valid JSON only — no markdown fences, no extra text."
 
+EXPECTED_COLS = {"address", "price", "bedrooms", "bathrooms", "sqft", "year_built", "asking_rent", "neighborhood_score"}
+REDFIN_COLS   = {"ADDRESS", "PRICE", "BEDS", "BATHS", "SQUARE FEET"}
+
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 
@@ -22,12 +25,78 @@ def get_client() -> Groq | None:
     return Groq(api_key=api_key)
 
 
+def _clean_numeric(series: pd.Series) -> pd.Series:
+    return (
+        series.astype(str)
+        .str.replace(r"[\$,\s]", "", regex=True)
+        .replace("nan", None)
+        .pipe(pd.to_numeric, errors="coerce")
+    )
+
+
+def convert_redfin(df: pd.DataFrame) -> pd.DataFrame:
+    """Convert a raw Redfin export DataFrame to the app's expected schema."""
+    df = df.copy()
+    df.columns = df.columns.str.strip().str.upper()
+
+    out = pd.DataFrame()
+    out["address"] = df.apply(
+        lambda r: " ".join(
+            str(r.get(c, "")).strip()
+            for c in ["ADDRESS", "CITY", "STATE OR PROVINCE", "ZIP OR POSTAL CODE"]
+            if str(r.get(c, "")).strip().lower() not in ("", "nan")
+        ),
+        axis=1,
+    )
+    out["price"]        = _clean_numeric(df["PRICE"])
+    out["bedrooms"]     = _clean_numeric(df["BEDS"]).fillna(3).astype(int)
+    out["bathrooms"]    = _clean_numeric(df["BATHS"]).fillna(1).astype(int)
+    out["sqft"]         = _clean_numeric(df["SQUARE FEET"]).fillna(1200).astype(int)
+    out["year_built"]   = _clean_numeric(df.get("YEAR BUILT", pd.Series(dtype=str))).fillna(1980).astype(int)
+    out["asking_rent"]  = (out["price"] * 0.009).round(0).astype(int)
+    out["neighborhood_score"] = 7
+
+    out = out.dropna(subset=["price"]).reset_index(drop=True)
+    out = out[out["price"] > 0]
+    return out
+
+
+def load_csv(file) -> tuple[pd.DataFrame, str]:
+    """Read uploaded file, auto-detect Redfin format, return (df, message)."""
+    raw = pd.read_csv(file, skiprows=1)
+    raw.columns = raw.columns.str.strip().str.upper()
+
+    if not REDFIN_COLS.issubset(set(raw.columns)):
+        # Try without skiprows
+        file.seek(0)
+        raw = pd.read_csv(file)
+        raw.columns = raw.columns.str.strip().str.upper()
+
+    if REDFIN_COLS.issubset(set(raw.columns)):
+        df = convert_redfin(raw)
+        # filter to only residential (skip vacant land, etc.)
+        if "PROPERTY TYPE" in raw.columns:
+            residential_mask = raw["PROPERTY TYPE"].str.contains(
+                "Family|Townhouse|Condo|Multi", case=False, na=False
+            )
+            df = df[residential_mask.values[:len(df)]].reset_index(drop=True)
+        return df, f"Redfin CSV detected — auto-converted {len(df)} residential properties."
+
+    # Already in expected format
+    file.seek(0)
+    df = pd.read_csv(file)
+    missing = EXPECTED_COLS - set(df.columns)
+    if missing:
+        return df, f"Warning: missing columns {missing}. Scoring may fail."
+    return df, f"Loaded {len(df)} leads."
+
+
 def score_lead(client: Groq, row: pd.Series) -> dict:
     annual_rent = row["asking_rent"] * 12
     grm = round(row["price"] / annual_rent, 2)
     price_per_sqft = round(row["price"] / row["sqft"], 2)
 
-    prompt = f"""Analyze this Tulsa OK rental property and return ONLY a JSON object — no markdown, no prose.
+    prompt = f"""Analyze this rental property investment and return ONLY a JSON object — no markdown, no prose.
 
 Property:
 - Address: {row["address"]}
@@ -104,7 +173,6 @@ def main() -> None:
     st.markdown("*Score and rank investment leads automatically using Groq AI (free)*")
     st.divider()
 
-    # API key check
     client = get_client()
     if client is None:
         st.error(
@@ -116,16 +184,21 @@ def main() -> None:
 
     # ── file upload ──────────────────────────────────────────────────────────
     uploaded = st.file_uploader(
-        "Upload a leads CSV (or leave empty to use sample_leads.csv)",
+        "Upload a CSV — Redfin export or pre-formatted leads file",
         type=["csv"],
-        help="Required columns: address, price, bedrooms, bathrooms, sqft, year_built, asking_rent, neighborhood_score",
+        help="Accepts raw Redfin downloads or CSVs with columns: address, price, bedrooms, bathrooms, sqft, year_built, asking_rent, neighborhood_score",
     )
 
     sample_path = os.path.join(os.path.dirname(__file__), "sample_leads.csv")
 
     if uploaded is not None:
-        df = pd.read_csv(uploaded)
-        st.success(f"Loaded **{len(df)}** leads from uploaded file.")
+        df, msg = load_csv(uploaded)
+        if "Warning" in msg:
+            st.warning(msg)
+        elif "Redfin" in msg:
+            st.success(msg)
+        else:
+            st.success(msg)
     elif os.path.exists(sample_path):
         df = pd.read_csv(sample_path)
         st.info(f"No file uploaded — using **sample_leads.csv** ({len(df)} leads).")
@@ -144,7 +217,7 @@ def main() -> None:
         with st.spinner("Scoring leads with Groq AI…"):
             for i, (_, row) in enumerate(df.iterrows()):
                 pct = i / len(df)
-                progress.progress(pct, text=f"Scoring {i + 1}/{len(df)}: {row['address'][:40]}…")
+                progress.progress(pct, text=f"Scoring {i + 1}/{len(df)}: {str(row['address'])[:40]}…")
                 scored = score_lead(client, row)
                 results.append(
                     {
@@ -187,7 +260,7 @@ def main() -> None:
             }
         )[["Address", "Score", "Decision", "Price", "Rent/mo", "GRM", "$/sqft", "Reasoning"]]
 
-        display["Price"] = display["Price"].apply(lambda x: f"${x:,.0f}")
+        display["Price"]  = display["Price"].apply(lambda x: f"${x:,.0f}")
         display["Rent/mo"] = display["Rent/mo"].apply(lambda x: f"${x:,.0f}")
         display["$/sqft"] = display["$/sqft"].apply(lambda x: f"${x:.2f}")
 

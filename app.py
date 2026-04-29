@@ -48,7 +48,13 @@ def convert_redfin(df: pd.DataFrame) -> pd.DataFrame:
         ),
         axis=1,
     )
-    out["price"]        = _clean_numeric(df["PRICE"])
+    out["price"] = _clean_numeric(df["PRICE"])
+
+    # Drop rows with no price before any int conversions
+    out = out.dropna(subset=["price"])
+    out = out[out["price"] > 0].reset_index(drop=True)
+    df  = df.loc[out.index].reset_index(drop=True)
+
     out["bedrooms"]     = _clean_numeric(df["BEDS"]).fillna(3).astype(int)
     out["bathrooms"]    = _clean_numeric(df["BATHS"]).fillna(1).astype(int)
     out["sqft"]         = _clean_numeric(df["SQUARE FEET"]).fillna(1200).astype(int)
@@ -56,9 +62,7 @@ def convert_redfin(df: pd.DataFrame) -> pd.DataFrame:
     out["asking_rent"]  = (out["price"] * 0.009).round(0).astype(int)
     out["neighborhood_score"] = 7
 
-    out = out.dropna(subset=["price"]).reset_index(drop=True)
-    out = out[out["price"] > 0]
-    return out
+    return out.reset_index(drop=True)
 
 
 def load_csv(file) -> tuple[pd.DataFrame, str]:

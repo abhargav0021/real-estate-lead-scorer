@@ -95,12 +95,26 @@ def load_csv(file) -> tuple[pd.DataFrame, str]:
     return df, f"Loaded {len(df)} leads."
 
 
+def get_decision(grm: float, neighborhood: int, price_per_sqft: float) -> tuple[str, int]:
+    """Compute decision and score deterministically — no AI discretion."""
+    if (grm <= 12 and neighborhood >= 6) or grm <= 10:
+        return "BUY", 9 if grm <= 10 else 8
+    elif grm > 15 or neighborhood <= 3 or price_per_sqft > 250:
+        return "PASS", 3
+    else:
+        return "INVESTIGATE", 6
+
+
 def score_lead(client: Groq, row: pd.Series) -> dict:
     annual_rent = row["asking_rent"] * 12
     grm = round(row["price"] / annual_rent, 2)
     price_per_sqft = round(row["price"] / row["sqft"], 2)
+    neighborhood = int(row["neighborhood_score"])
 
-    prompt = f"""Analyze this rental property investment and return ONLY a JSON object — no markdown, no prose.
+    decision, score = get_decision(grm, neighborhood, price_per_sqft)
+
+    prompt = f"""You are a real estate analyst. Write a 2-sentence investment reasoning for this property.
+The decision has already been determined as {decision} — your reasoning must support this conclusion.
 
 Property:
 - Address: {row["address"]}
@@ -108,22 +122,17 @@ Property:
 - Bedrooms: {row["bedrooms"]} | Bathrooms: {row["bathrooms"]}
 - Square Footage: {row["sqft"]} sqft | Year Built: {row["year_built"]}
 - Monthly Asking Rent: ${row["asking_rent"]:,} | Annual Rent: ${annual_rent:,}
-- Gross Rent Multiplier (GRM): {grm}  (price / annual rent; lower = better)
+- Gross Rent Multiplier (GRM): {grm}
 - Price per Sqft: ${price_per_sqft}
-- Neighborhood Score: {row["neighborhood_score"]}/10
+- Neighborhood Score: {neighborhood}/10
 
-Scoring rules — apply these strictly:
-- score 8-10 → decision MUST be BUY   (GRM ≤ 12 AND neighborhood ≥ 6, OR GRM ≤ 10 any neighborhood)
-- score 5-7  → decision MUST be INVESTIGATE  (GRM 12-15 OR neighborhood 4-5)
-- score 1-4  → decision MUST be PASS  (GRM > 15 OR neighborhood ≤ 3 OR price_per_sqft > $250)
-
-Return exactly this JSON shape:
+Return ONLY this JSON — no markdown, no extra text:
 {{
-  "score": <integer 1-10>,
-  "decision": "<BUY|PASS|INVESTIGATE>",
+  "score": {score},
+  "decision": "{decision}",
   "grm": {grm},
   "price_per_sqft": {price_per_sqft},
-  "reasoning": "<2 sentences max explaining the investment score>"
+  "reasoning": "<2 sentences supporting the {decision} decision>"
 }}"""
 
     try:
@@ -141,15 +150,21 @@ Return exactly this JSON shape:
             parts = text.split("```")
             text = parts[1].lstrip("json").strip() if len(parts) > 1 else text
 
-        return json.loads(text)
+        result = json.loads(text)
+        # Always enforce the Python-computed decision and score
+        result["decision"] = decision
+        result["score"] = score
+        result["grm"] = grm
+        result["price_per_sqft"] = price_per_sqft
+        return result
 
     except Exception:
         return {
-            "score": 5,
-            "decision": "INVESTIGATE",
+            "score": score,
+            "decision": decision,
             "grm": grm,
             "price_per_sqft": price_per_sqft,
-            "reasoning": "Scoring response could not be parsed. Manual review recommended.",
+            "reasoning": f"GRM of {grm} with neighborhood score {neighborhood}/10 — {decision}.",
         }
 
 

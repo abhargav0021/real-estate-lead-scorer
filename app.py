@@ -134,10 +134,10 @@ def main() -> None:
         st.stop()
 
     st.subheader("Leads Preview")
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    st.dataframe(df, width="stretch", hide_index=True)
 
     # ── scoring button ───────────────────────────────────────────────────────
-    if st.button("Score Leads", type="primary", use_container_width=True):
+    if st.button("Score Leads", type="primary", width="stretch"):
         results = []
         progress = st.progress(0.0, text="Starting…")
 
@@ -193,14 +193,14 @@ def main() -> None:
 
         st.dataframe(
             display.style.apply(highlight_decision, axis=1),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
 
         # ── bar chart ────────────────────────────────────────────────────────
         st.subheader("Score by Property")
         chart_df = results_df.set_index("address")[["score"]]
-        st.bar_chart(chart_df, y="score", use_container_width=True)
+        st.bar_chart(chart_df, y="score", width="stretch")
 
         # ── download button ──────────────────────────────────────────────────
         buf = io.StringIO()
@@ -210,7 +210,7 @@ def main() -> None:
             data=buf.getvalue(),
             file_name="scored_leads.csv",
             mime="text/csv",
-            use_container_width=True,
+            width="stretch",
         )
 
 
